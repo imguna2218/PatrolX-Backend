@@ -45,4 +45,5 @@ router.post('/restart-patrol', authenticate, restrictTo('worker'), PatrolControl
 router.post('/location', authenticate, restrictTo('worker'), PatrolController.updateLocation);
 
 router.post('/mark-checkpoint', authenticate, restrictTo('worker'), PatrolController.markCheckpoint);
+router.post('/end-patrol', authenticate, restrictTo('worker'), PatrolController.endPatrol);
 module.exports = router;
