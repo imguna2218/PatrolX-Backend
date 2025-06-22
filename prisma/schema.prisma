@@ -1,0 +1,410 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model WorkerLocation {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  latitude  Float
+  longitude Float
+  updatedAt DateTime @updatedAt
+  user      Users    @relation(fields: [userId], references: [id])
+}
+
+model Users {
+  id                  String               @id @default(uuid())
+  username            String               @unique @db.VarChar(50)
+  email               String               @unique @db.VarChar(100)
+  password_hash       String               @db.VarChar(255)
+  full_name           String               @db.VarChar(100)
+  phone               String?              @db.VarChar(20)
+  role                UserRole
+  status              UserStatus           @default(active)
+  created_by          String?              @map("created_by")
+  created_at          DateTime             @default(now())
+  updated_at          DateTime             @default(now())
+  last_login          DateTime?
+  profile_image_url   String?              @db.VarChar(500)
+  deleted_at          DateTime?
+  metadata            Json                 @default("{}")
+  isLoggedIn          Boolean              @default(false)
+  app_settings        AppSettings[]
+  audit_logs          AuditLogs[]
+  incidents_assigned  Incidents[]          @relation("AssignedTo")
+  incidents_reported  Incidents[]          @relation("ReportedBy")
+  LocationTracks      LocationTracks[]
+  locations           Locations[]          @relation("LocationCreatedBy")
+  notifications       Notifications[]
+  patrol_assignments  PatrolAssignments[]  @relation("AssignedBy")
+  assigned_patrols    PatrolAssignments[]  @relation("WorkerAssignments")
+  PatrolSessions      PatrolSessions[]
+  child_hierarchy     UserHierarchy[]      @relation("ChildHierarchy")
+  parent_hierarchy    UserHierarchy[]      @relation("ParentHierarchy")
+  creator             Users?               @relation("UserCreatedBy", fields: [created_by], references: [id])
+  created_users       Users[]              @relation("UserCreatedBy")
+  worker_availability WorkerAvailability[]
+  WorkerLocation      WorkerLocation?
+
+  @@index([role], map: "idx_users_role")
+  @@index([status], map: "idx_users_status")
+  @@index([created_by], map: "idx_users_created_by")
+}
+
+model UserHierarchy {
+  id         String   @id @default(uuid())
+  parent_id  String   @map("parent_id")
+  child_id   String   @map("child_id")
+  created_at DateTime @default(now())
+  child      Users    @relation("ChildHierarchy", fields: [child_id], references: [id], onDelete: Cascade)
+  parent     Users    @relation("ParentHierarchy", fields: [parent_id], references: [id], onDelete: Cascade)
+
+  @@unique([parent_id, child_id])
+  @@index([parent_id], map: "idx_user_hierarchy_parent")
+  @@index([child_id], map: "idx_user_hierarchy_child")
+}
+
+model WorkerAvailability {
+  id           String   @id @default(uuid())
+  worker_id    String   @map("worker_id")
+  start_time   DateTime
+  end_time     DateTime
+  is_available Boolean  @default(true)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now())
+  metadata     Json     @default("{}")
+  location_id  String?  @map("location_id")
+  worker       Users    @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+}
+
+model Locations {
+  id                   String                @id @default(uuid())
+  name                 String                @db.VarChar(100)
+  description          String?
+  address              String?
+  created_by           String?               @map("created_by")
+  created_at           DateTime              @default(now())
+  updated_at           DateTime              @default(now())
+  deleted_at           DateTime?
+  metadata             Json                  @default("{}")
+  latitude             Decimal               @db.Decimal(10, 8)
+  longitude            Decimal               @db.Decimal(11, 8)
+  assignment_locations AssignmentLocations[]
+  checkpoints          Checkpoints[]
+  creator              Users?                @relation("LocationCreatedBy", fields: [created_by], references: [id])
+}
+
+model Checkpoints {
+  id                    String                @id @default(uuid())
+  location_id           String                @map("location_id")
+  name                  String                @db.VarChar(100)
+  latitude              Decimal               @db.Decimal(10, 8)
+  longitude             Decimal               @db.Decimal(11, 8)
+  radius_meters         Int                   @default(50)
+  sequence_order        Int
+  priority              Priority              @default(medium)
+  is_active             Boolean               @default(true)
+  created_at            DateTime              @default(now())
+  updated_at            DateTime              @default(now())
+  metadata              Json                  @default("{}")
+  assignmentLocationsId String?
+  checkpoint_visits     CheckpointVisits[]
+  location              Locations             @relation(fields: [location_id], references: [id], onDelete: Cascade)
+  assignment_locations  AssignmentLocations[] @relation("AssignmentCheckpoints")
+
+  @@index([location_id], map: "idx_checkpoints_location")
+}
+
+model PatrolAssignments {
+  id                         String                 @id @default(uuid())
+  worker_id                  String                 @map("worker_id")
+  assigned_by                String                 @map("assigned_by")
+  shift_name                 String?                @db.VarChar(100)
+  start_date                 DateTime               @db.Date
+  end_date                   DateTime?              @db.Date
+  expected_start_time        DateTime?              @db.Time(6)
+  expected_end_time          DateTime?              @db.Time(6)
+  estimated_duration_minutes Int?
+  priority                   Priority               @default(medium)
+  status                     PatrolAssignmentStatus @default(pending)
+  instructions               String?
+  created_at                 DateTime               @default(now())
+  updated_at                 DateTime               @default(now())
+  deleted_at                 DateTime?
+  metadata                   Json                   @default("{}")
+  assignment_locations       AssignmentLocations[]
+  assigner                   Users                  @relation("AssignedBy", fields: [assigned_by], references: [id])
+  worker                     Users                  @relation("WorkerAssignments", fields: [worker_id], references: [id], onDelete: Cascade)
+  patrol_sessions            PatrolSessions[]
+
+  @@index([worker_id], map: "idx_patrol_assignments_worker")
+  @@index([status], map: "idx_patrol_assignments_status")
+  @@index([start_date, end_date], map: "idx_patrol_assignments_date")
+}
+
+model AssignmentLocations {
+  id                        String             @id @default(uuid())
+  assignment_id             String             @map("assignment_id")
+  location_id               String             @map("location_id")
+  is_mandatory              Boolean            @default(true)
+  expected_duration_minutes Int?
+  special_instructions      String?
+  created_at                DateTime           @default(now())
+  assignment                PatrolAssignments  @relation(fields: [assignment_id], references: [id], onDelete: Cascade)
+  location                  Locations          @relation(fields: [location_id], references: [id], onDelete: Cascade)
+  checkpoint_visits         CheckpointVisits[]
+  checkpoints               Checkpoints[]      @relation("AssignmentCheckpoints")
+
+  @@unique([assignment_id, location_id])
+  @@index([assignment_id], map: "idx_assignment_locations_assignment")
+}
+
+model PatrolSessions {
+  id                          String              @id @default(uuid())
+  assignment_id               String              @map("assignment_id")
+  worker_id                   String              @map("worker_id")
+  session_date                DateTime            @db.Date
+  started_at                  DateTime?
+  ended_at                    DateTime?
+  total_duration_minutes      Int?
+  completed_checkpoints_count Int                 @default(0)
+  progress_percentage         Decimal?            @db.Decimal(5, 2)
+  status                      PatrolSessionStatus @default(not_started)
+  start_latitude              Decimal?            @db.Decimal(10, 8)
+  start_longitude             Decimal?            @db.Decimal(11, 8)
+  end_latitude                Decimal?            @db.Decimal(10, 8)
+  end_longitude               Decimal?            @db.Decimal(11, 8)
+  total_distance_meters       Int?
+  notes                       String?
+  created_at                  DateTime            @default(now())
+  updated_at                  DateTime            @default(now())
+  deleted_at                  DateTime?
+  metadata                    Json                @default("{}")
+  checkpoint_visits           CheckpointVisits[]
+  incidents                   Incidents[]
+  location_tracks             LocationTracks[]
+  patrol_media                PatrolMedia[]
+  assignment                  PatrolAssignments   @relation(fields: [assignment_id], references: [id])
+  worker                      Users               @relation(fields: [worker_id], references: [id])
+
+  @@index([worker_id], map: "idx_patrol_sessions_worker")
+  @@index([session_date], map: "idx_patrol_sessions_date")
+  @@index([status], map: "idx_patrol_sessions_status")
+}
+
+model CheckpointVisits {
+  id                          String                @id @default(uuid())
+  session_id                  String                @map("session_id")
+  assignment_location_id      String                @map("assignment_location_id")
+  checkpoint_id               String                @map("checkpoint_id")
+  arrived_at                  DateTime?
+  departed_at                 DateTime?
+  duration_minutes            Int?
+  latitude                    Decimal?              @db.Decimal(10, 8)
+  longitude                   Decimal?              @db.Decimal(11, 8)
+  distance_from_target_meters Int?
+  geofence_status             GeofenceStatus?
+  status                      CheckpointVisitStatus @default(pending)
+  notes                       String?
+  created_at                  DateTime              @default(now())
+  metadata                    Json                  @default("{}")
+  assignment_location         AssignmentLocations   @relation(fields: [assignment_location_id], references: [id])
+  checkpoint                  Checkpoints           @relation(fields: [checkpoint_id], references: [id])
+  session                     PatrolSessions        @relation(fields: [session_id], references: [id], onDelete: Cascade)
+  incidents                   Incidents[]
+  patrol_media                PatrolMedia[]
+
+  @@index([session_id], map: "idx_checkpoint_visits_session")
+  @@index([checkpoint_id], map: "idx_checkpoint_visits_checkpoint")
+}
+
+model LocationTracks {
+  id              String         @id @default(uuid())
+  session_id      String         @map("session_id")
+  worker_id       String         @map("worker_id")
+  latitude        Decimal        @db.Decimal(10, 8)
+  longitude       Decimal        @db.Decimal(11, 8)
+  accuracy_meters Float?
+  speed_mps       Float?
+  bearing         Float?
+  timestamp       DateTime
+  battery_level   Int?
+  is_online       Boolean        @default(true)
+  created_at      DateTime       @default(now())
+  session         PatrolSessions @relation(fields: [session_id], references: [id], onDelete: Cascade)
+  worker          Users          @relation(fields: [worker_id], references: [id])
+
+  @@index([worker_id], map: "idx_location_tracks_worker")
+}
+
+model PatrolMedia {
+  id                  String            @id @default(uuid())
+  session_id          String?           @map("session_id")
+  checkpoint_visit_id String?           @map("checkpoint_visit_id")
+  media_type          MediaType
+  file_url            String            @db.VarChar(500)
+  file_size_bytes     BigInt?
+  mime_type           String?           @db.VarChar(100)
+  caption             String?
+  latitude            Decimal?          @db.Decimal(10, 8)
+  longitude           Decimal?          @db.Decimal(11, 8)
+  captured_at         DateTime
+  uploaded_at         DateTime          @default(now())
+  metadata            Json              @default("{}")
+  checkpoint_visit    CheckpointVisits? @relation(fields: [checkpoint_visit_id], references: [id], onDelete: Cascade)
+  session             PatrolSessions?   @relation(fields: [session_id], references: [id], onDelete: Cascade)
+}
+
+model Incidents {
+  id                  String            @id @default(uuid())
+  session_id          String?           @map("session_id")
+  checkpoint_visit_id String?           @map("checkpoint_visit_id")
+  reported_by         String            @map("reported_by")
+  incident_type       String            @db.VarChar(100)
+  severity            IncidentSeverity  @default(medium)
+  priority            Priority          @default(medium)
+  title               String            @db.VarChar(200)
+  description         String
+  latitude            Decimal?          @db.Decimal(10, 8)
+  longitude           Decimal?          @db.Decimal(11, 8)
+  status              IncidentStatus    @default(open)
+  assigned_to         String?           @map("assigned_to")
+  occurred_at         DateTime
+  reported_at         DateTime          @default(now())
+  resolved_at         DateTime?
+  metadata            Json              @default("{}")
+  assignee            Users?            @relation("AssignedTo", fields: [assigned_to], references: [id])
+  checkpoint_visit    CheckpointVisits? @relation(fields: [checkpoint_visit_id], references: [id])
+  reporter            Users             @relation("ReportedBy", fields: [reported_by], references: [id])
+  session             PatrolSessions?   @relation(fields: [session_id], references: [id])
+
+  @@index([status], map: "idx_incidents_status")
+  @@index([severity], map: "idx_incidents_severity")
+  @@index([reported_by], map: "idx_incidents_reported_by")
+}
+
+model Notifications {
+  id                  String           @id @default(uuid())
+  user_id             String           @map("user_id")
+  type                NotificationType
+  title               String           @db.VarChar(200)
+  message             String
+  priority            Priority         @default(medium)
+  is_read             Boolean          @default(false)
+  action_url          String?          @db.VarChar(500)
+  expires_at          DateTime?
+  created_at          DateTime         @default(now())
+  read_at             DateTime?
+  related_entity_type String?          @db.VarChar(50)
+  related_entity_id   String?
+  metadata            Json             @default("{}")
+  user                Users            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, is_read], map: "idx_notifications_user_unread")
+  @@index([related_entity_type, related_entity_id], map: "idx_notifications_entity")
+}
+
+model AppSettings {
+  id          String   @id @default(uuid())
+  key         String   @unique @db.VarChar(100)
+  value       Json
+  description String?
+  category    String?  @default("general") @db.VarChar(50)
+  is_system   Boolean  @default(false)
+  updated_by  String?  @map("updated_by")
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now())
+  updater     Users?   @relation(fields: [updated_by], references: [id])
+}
+
+model AuditLogs {
+  id          String   @id @default(uuid())
+  user_id     String?  @map("user_id")
+  action      String   @db.VarChar(100)
+  entity_type String   @db.VarChar(50)
+  entity_id   String?
+  old_values  Json?
+  new_values  Json?
+  ip_address  String?  @db.Inet
+  user_agent  String?
+  created_at  DateTime @default(now())
+  user        Users?   @relation(fields: [user_id], references: [id])
+}
+
+enum UserRole {
+  super_admin
+  admin
+  worker
+}
+
+enum UserStatus {
+  active
+  inactive
+  suspended
+}
+
+enum Priority {
+  low
+  medium
+  high
+}
+
+enum PatrolAssignmentStatus {
+  pending
+  active
+  completed
+  cancelled
+}
+
+enum PatrolSessionStatus {
+  not_started
+  in_progress
+  paused
+  completed
+  abandoned
+}
+
+enum CheckpointVisitStatus {
+  pending
+  arrived
+  completed
+  skipped
+}
+
+enum GeofenceStatus {
+  inside
+  outside
+}
+
+enum MediaType {
+  photo
+  video
+  audio
+  document
+}
+
+enum IncidentSeverity {
+  low
+  medium
+  high
+  critical
+}
+
+enum IncidentStatus {
+  open
+  in_progress
+  resolved
+  closed
+}
+
+enum NotificationType {
+  assignment
+  alert
+  reminder
+  system
+}
